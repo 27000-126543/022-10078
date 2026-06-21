@@ -10,9 +10,30 @@ export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as AppState
-      if (parsed.novels && parsed.novels.length > 0) {
-        return parsed
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      if (Array.isArray(parsed.novels) && parsed.novels.length > 0) {
+        const migratedNovels = (parsed.novels as Record<string, unknown>[]).map(
+          (n) =>
+            ({
+              ...n,
+              priority: n.priority || 'none',
+              feedThreshold: n.feedThreshold || 10,
+              expectation: n.expectation ?? 3,
+              isPaid: n.isPaid ?? false,
+              lastReadChapter: n.lastReadChapter ?? 0,
+              tags: n.tags || [],
+            }) as Novel
+        )
+        return {
+          novels: migratedNovels,
+          chapters: (parsed.chapters as Chapter[]) || [],
+          notes: (parsed.notes as Note[]) || [],
+          selectedNovelId: (parsed.selectedNovelId as string) || null,
+          lastRadarCheck: (parsed.lastRadarCheck as number) || Date.now(),
+          dismissedMustAlerts: (parsed.dismissedMustAlerts as string[]) || [],
+          dismissedFeedAlerts:
+            (parsed.dismissedFeedAlerts as Record<string, number>) || {},
+        }
       }
     }
   } catch (e) {
@@ -334,6 +355,8 @@ function createInitialState(): AppState {
     notes,
     selectedNovelId: 'n1',
     lastRadarCheck: now,
+    dismissedMustAlerts: [],
+    dismissedFeedAlerts: {},
   }
 }
 
@@ -420,4 +443,44 @@ export function getFeedProgress(
     threshold: novel.feedThreshold,
     ready: unreadCount >= novel.feedThreshold,
   }
+}
+
+export function generatePlaceholderChapters(
+  novelId: string,
+  start: number,
+  end: number,
+  baseTime?: number
+): Chapter[] {
+  if (end <= start) return []
+  const chapters: Chapter[] = []
+  const now = baseTime ?? Date.now()
+  for (let i = start + 1; i <= end; i++) {
+    chapters.push({
+      id: `${novelId}-c${i}`,
+      novelId,
+      title: `第${i}章 待更新`,
+      wordCount: 0,
+      publishTime: now - (end - i) * 60 * 60 * 1000,
+      isRead: false,
+      chapterNumber: i,
+    })
+  }
+  return chapters
+}
+
+export function getMissingChapterNumbers(
+  existingChapters: Chapter[],
+  lastRead: number,
+  latestChapter: number
+): { start: number; end: number } {
+  const existingSet = new Set(existingChapters.map((c) => c.chapterNumber))
+  let start = lastRead
+  let end = latestChapter
+  for (let i = lastRead + 1; i <= latestChapter; i++) {
+    if (!existingSet.has(i)) {
+      start = i - 1
+      break
+    }
+  }
+  return { start, end }
 }

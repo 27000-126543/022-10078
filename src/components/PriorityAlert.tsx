@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useStore } from '../store/StoreContext'
 import { Novel, Chapter } from '../types'
 import { CATEGORY_COLORS, CATEGORY_LABELS, PRIORITY_COLORS } from '../types'
 import { formatWordCount, getUnreadCountByNovelId } from '../lib/storage'
-import { Sparkles, X, ChevronRight, Bell, Utensils } from 'lucide-react'
+import { Sparkles, X, ChevronRight, Bell, Utensils, Check } from 'lucide-react'
 
 interface MustReadAlert {
   novel: Novel
@@ -11,62 +11,54 @@ interface MustReadAlert {
 }
 
 const PriorityAlert: React.FC = () => {
-  const { state, selectNovel, markNovelReadTo } = useStore()
-  const [alerts, setAlerts] = useState<MustReadAlert[]>([])
-  const [feedReady, setFeedReady] = useState<MustReadAlert[]>([])
+  const {
+    state,
+    selectNovel,
+    markNovelReadTo,
+    dismissMustAlert,
+    dismissFeedAlert,
+    getChaptersForNovel,
+  } = useStore()
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    const now = Date.now()
-    const cutoff24h = now - 24 * 60 * 60 * 1000
-
+  const allAlerts = useMemo(() => {
     const mustAlerts: MustReadAlert[] = []
     const feedAlerts: MustReadAlert[] = []
 
     for (const novel of state.novels) {
-      if (dismissedIds.has(novel.id)) continue
-
-      const unreadChapters = state.chapters.filter(
-        (c) =>
-          c.novelId === novel.id &&
-          c.chapterNumber > novel.lastReadChapter &&
-          !c.isRead &&
-          c.publishTime >= cutoff24h
+      const totalUnread = getUnreadCountByNovelId(
+        state.chapters,
+        novel.id,
+        novel.lastReadChapter
       )
 
-      if (unreadChapters.length === 0) continue
+      if (totalUnread === 0) continue
 
       if (novel.priority === 'must') {
-        mustAlerts.push({ novel, unreadChapters })
-      } else if (novel.priority === 'feed') {
-        const totalUnread = getUnreadCountByNovelId(
-          state.chapters,
-          novel.id,
-          novel.lastReadChapter
+        if (state.dismissedMustAlerts.includes(novel.id)) continue
+        const chapters = getChaptersForNovel(novel.id).filter(
+          (c) => c.chapterNumber > novel.lastReadChapter && !c.isRead
         )
-        if (totalUnread >= novel.feedThreshold) {
-          feedAlerts.push({
-            novel,
-            unreadChapters: state.chapters
-              .filter(
-                (c) =>
-                  c.novelId === novel.id &&
-                  c.chapterNumber > novel.lastReadChapter &&
-                  !c.isRead
-              )
-              .sort((a, b) => b.chapterNumber - a.chapterNumber),
-          })
+        if (chapters.length > 0) {
+          mustAlerts.push({ novel, unreadChapters: chapters })
+        }
+      } else if (novel.priority === 'feed') {
+        if (totalUnread < novel.feedThreshold) continue
+        const lastDismissed = state.dismissedFeedAlerts[novel.id]
+        if (lastDismissed !== undefined && totalUnread <= lastDismissed) continue
+
+        const chapters = getChaptersForNovel(novel.id).filter(
+          (c) => c.chapterNumber > novel.lastReadChapter && !c.isRead
+        )
+        if (chapters.length > 0) {
+          feedAlerts.push({ novel, unreadChapters: chapters })
         }
       }
     }
 
-    setAlerts(mustAlerts)
-    setFeedReady(feedAlerts)
-    setCurrentIndex(0)
-  }, [state.chapters, state.novels, dismissedIds])
+    return [...mustAlerts, ...feedAlerts]
+  }, [state, getChaptersForNovel])
 
-  const allAlerts = [...alerts, ...feedReady]
   const currentAlert = allAlerts[currentIndex]
 
   if (!currentAlert) return null
@@ -74,24 +66,33 @@ const PriorityAlert: React.FC = () => {
   const { novel, unreadChapters } = currentAlert
   const isMust = novel.priority === 'must'
   const iconColor = PRIORITY_COLORS[novel.priority]
-
-  const dismissAll = () => {
-    const ids = new Set(dismissedIds)
-    for (const a of allAlerts) ids.add(a.novel.id)
-    setDismissedIds(ids)
-  }
+  const totalUnread = unreadChapters.length
 
   const dismissCurrent = () => {
-    setDismissedIds((prev) => new Set(prev).add(novel.id))
-    if (currentIndex >= allAlerts.length - 1) {
+    if (isMust) {
+      dismissMustAlert(novel.id)
+    } else {
+      dismissFeedAlert(novel.id, totalUnread)
+    }
+    if (currentIndex < allAlerts.length - 1) {
+      setCurrentIndex((i) => Math.min(i, allAlerts.length - 2))
     }
   }
 
   const next = () => {
     if (currentIndex < allAlerts.length - 1) {
       setCurrentIndex(currentIndex + 1)
-    } else {
-      dismissAll()
+    }
+  }
+
+  const dismissAll = () => {
+    for (const a of allAlerts) {
+      if (a.novel.priority === 'must') {
+        dismissMustAlert(a.novel.id)
+      } else {
+        const count = a.unreadChapters.length
+        dismissFeedAlert(a.novel.id, count)
+      }
     }
   }
 
@@ -109,7 +110,8 @@ const PriorityAlert: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg bg-novel-card border-2 rounded-2xl shadow-2xl overflow-hidden"
+      <div
+        className="w-full max-w-lg bg-novel-card border-2 rounded-2xl shadow-2xl overflow-hidden"
         style={{ borderColor: iconColor }}
       >
         <div
@@ -141,7 +143,8 @@ const PriorityAlert: React.FC = () => {
           </div>
           <button
             onClick={dismissAll}
-            className="p-1.5 hover:bg-white/10 rounded-lg text-novel-muted hover:text-novel-text"
+            className="p-2 hover:bg-white/10 rounded-lg text-novel-muted hover:text-novel-text"
+            title="全部关闭"
           >
             <X className="w-5 h-5" />
           </button>
@@ -177,15 +180,17 @@ const PriorityAlert: React.FC = () => {
                 <span>{novel.source}</span>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
                   style={{ backgroundColor: `${iconColor}18`, color: iconColor }}
                 >
                   <Bell className="w-3.5 h-3.5" />
-                  <span className="font-bold">{unreadChapters.length}章新更新</span>
+                  <span className="font-bold">{totalUnread}章未读</span>
                 </div>
                 {!isMust && (
                   <div className="text-xs text-novel-muted">
-                    已达阈值 {novel.feedThreshold}章
+                    阈值 {novel.feedThreshold}章 ·{' '}
+                    <span className="text-novel-feed font-bold">可宰了</span>
                   </div>
                 )}
               </div>
@@ -225,9 +230,10 @@ const PriorityAlert: React.FC = () => {
             </button>
             <button
               onClick={markAllRead}
-              className="flex-1 px-4 py-2.5 rounded-xl text-sm bg-novel-muted/20 text-novel-text hover:bg-novel-muted/30 transition-colors"
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm bg-novel-muted/20 text-novel-text hover:bg-novel-muted/30 transition-colors flex items-center justify-center gap-1"
             >
-              全部标为已读
+              <Check className="w-4 h-4" />
+              全部已读
             </button>
             <button
               onClick={goToNovel}

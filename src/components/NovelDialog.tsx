@@ -18,7 +18,8 @@ interface Props {
 }
 
 const NovelDialog: React.FC<Props> = ({ open, onClose, editingNovel }) => {
-  const { addNovel, updateNovel, deleteNovel } = useStore()
+  const { addNovel, updateNovel, deleteNovel, fillMissingChapters, selectNovel } =
+    useStore()
 
   const [form, setForm] = useState({
     title: '',
@@ -86,18 +87,28 @@ const NovelDialog: React.FC<Props> = ({ open, onClose, editingNovel }) => {
       .map((s) => s.trim())
       .filter(Boolean)
 
+    let novelId: string
     if (isEdit && editingNovel) {
       updateNovel({
         ...editingNovel,
         ...form,
         tags,
       })
+      novelId = editingNovel.id
     } else {
-      addNovel({
+      novelId = addNovel({
         ...form,
         tags,
       })
+      selectNovel(novelId)
     }
+
+    if (form.latestChapter > form.lastReadChapter) {
+      setTimeout(() => {
+        fillMissingChapters(novelId, form.latestChapter)
+      }, 0)
+    }
+
     onClose()
   }
 

@@ -10,7 +10,19 @@ import {
   Chapter,
 } from '../types'
 import { getRecentChapters, formatTime, formatWordCount } from '../lib/storage'
-import { Radar, Zap, Clock, FileText, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  Radar,
+  Zap,
+  Clock,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
+  EyeOff,
+  Eye,
+  Check,
+  ListFilter,
+} from 'lucide-react'
 
 type SortType = 'time' | 'words'
 type FilterCat = 'all' | CategoryType
@@ -21,10 +33,12 @@ interface Props {
 }
 
 const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
-  const { state, selectNovel, markChapterRead, getUnreadForNovel } = useStore()
+  const { state, selectNovel, markNovelReadTo, getUnreadForNovel } = useStore()
   const [sortBy, setSortBy] = useState<SortType>('time')
   const [filterCat, setFilterCat] = useState<FilterCat>('all')
   const [wordFilter, setWordFilter] = useState({ min: 0, max: 99999999 })
+  const [onlyUnread, setOnlyUnread] = useState(false)
+  const [hideWatch, setHideWatch] = useState(false)
 
   const recentChapters = useMemo(() => getRecentChapters(state.chapters, 24), [state.chapters])
 
@@ -38,6 +52,8 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     let list = recentChapters.filter((c) => {
       const novel = novelMap[c.novelId]
       if (!novel) return false
+      if (hideWatch && novel.priority === 'watch') return false
+      if (onlyUnread && c.isRead) return false
       const passesCat = filterCat === 'all' || novel.category === filterCat
       const passesWf = c.wordCount >= wordFilter.min && c.wordCount <= wordFilter.max
       return passesCat && passesWf
@@ -48,7 +64,7 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
       list = [...list].sort((a, b) => b.wordCount - a.wordCount)
     }
     return list
-  }, [recentChapters, sortBy, filterCat, wordFilter, novelMap])
+  }, [recentChapters, sortBy, filterCat, wordFilter, onlyUnread, hideWatch, novelMap])
 
   const groupedByNovel = useMemo(() => {
     const groups = new Map<string, { novel: Novel; chapters: Chapter[] }>()
@@ -63,8 +79,9 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     return groups
   }, [filteredChapters, novelMap])
 
-  const totalNew = recentChapters.length
+  const totalNew = filteredChapters.length
   const totalNovels = groupedByNovel.size
+  const unreadOnlyCount = filteredChapters.filter((c) => !c.isRead).length
 
   const wordPresets = [
     { label: '全部', min: 0, max: 99999999 },
@@ -77,6 +94,20 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
   const currentWfIdx = wordPresets.findIndex(
     (w) => w.min === wordFilter.min && w.max === wordFilter.max
   )
+
+  const handleMarkAllRead = () => {
+    for (const [novelId, { novel }] of groupedByNovel) {
+      if (novel.latestChapter) {
+        markNovelReadTo(novelId, novel.latestChapter)
+      }
+    }
+  }
+
+  const handleMarkNovelRead = (novelId: string, latestChapter?: number) => {
+    if (latestChapter) {
+      markNovelReadTo(novelId, latestChapter)
+    }
+  }
 
   return (
     <div className="border-b border-novel-border bg-novel-card/50 backdrop-blur-sm">
@@ -94,16 +125,17 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold">更新雷达</h2>
               <span className="text-xs text-novel-muted">
-                最近24小时 · {totalNovels}部作品 · {totalNew}章更新
+                最近24小时 · {totalNovels}部作品 · {totalNew}章
+                {onlyUnread && <span className="text-novel-accent"> · 未读{unreadOnlyCount}章</span>}
               </span>
             </div>
             <p className="text-xs text-novel-muted mt-0.5">
-              实时监控追更列表，一键直达新章节
+              实时监控追更列表，一键批量标记已读
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-novel-dark rounded-lg p-1">
             <button
               onClick={() => setSortBy('time')}
@@ -128,6 +160,44 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
               字数
             </button>
           </div>
+
+          <div className="h-5 w-px bg-novel-border" />
+
+          <button
+            onClick={() => setOnlyUnread(!onlyUnread)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              onlyUnread
+                ? 'bg-novel-accent/20 text-novel-accent'
+                : 'text-novel-muted hover:text-novel-text hover:bg-white/5'
+            }`}
+            title="只看未读更新"
+          >
+            {onlyUnread ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            只看未读
+          </button>
+
+          <button
+            onClick={() => setHideWatch(!hideWatch)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              hideWatch
+                ? 'bg-novel-watch/20 text-novel-watch'
+                : 'text-novel-muted hover:text-novel-text hover:bg-white/5'
+            }`}
+            title="隐藏弃坑观察作品"
+          >
+            <ListFilter className="w-3.5 h-3.5" />
+            隐藏观察
+          </button>
+
+          {totalNovels > 0 && (
+            <button
+              onClick={handleMarkAllRead}
+              className="flex items-center gap-1 px-3 py-1.5 bg-novel-feed/20 text-novel-feed rounded-lg text-xs font-medium hover:bg-novel-feed/30 transition-colors"
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              全部标读
+            </button>
+          )}
 
           <button
             onClick={() => onToggleExpanded(!expanded)}
@@ -196,7 +266,11 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
           {filteredChapters.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-novel-muted">
               <Radar className="w-8 h-8 mb-2 opacity-50" />
-              <p className="text-sm">24小时内暂无符合条件的更新</p>
+              <p className="text-sm">
+                {onlyUnread || hideWatch
+                  ? '当前筛选条件下无更新'
+                  : '24小时内暂无符合条件的更新'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
@@ -219,10 +293,22 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
                         {novel.title.slice(0, 2)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="font-medium text-sm truncate" title={novel.title}>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="font-medium text-sm truncate flex-1" title={novel.title}>
                             {novel.title}
                           </p>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleMarkNovelRead(novelId, novel.latestChapter)
+                            }}
+                            className="flex-shrink-0 p-1 text-novel-muted hover:text-novel-accent hover:bg-novel-accent/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="标记全部已读"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
                           {novel.priority !== 'none' && (
                             <span
                               className="tag flex-shrink-0"
@@ -239,18 +325,23 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
                               +{unreadCount}
                             </span>
                           )}
+                          <span className="text-[11px] text-novel-muted">
+                            {novel.source}
+                          </span>
                         </div>
-                        <p className="text-xs text-novel-muted mb-2">
-                          {novel.author} · {novel.source}
-                        </p>
                         <div className="space-y-1">
                           {chapters.slice(0, 3).map((ch) => (
                             <div
                               key={ch.id}
-                              className="flex items-center justify-between text-xs py-1 px-2 rounded bg-novel-dark/60 group/chapter hover:bg-novel-dark"
+                              className={`flex items-center justify-between text-xs py-1 px-2 rounded transition-colors ${
+                                ch.isRead
+                                  ? 'bg-novel-dark/30 opacity-60'
+                                  : 'bg-novel-dark/60 hover:bg-novel-dark'
+                              } group/chapter`}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                if (!ch.isRead) markChapterRead(ch.id)
+                                if (ch.isRead) return
+                                selectNovel(novelId)
                               }}
                             >
                               <div className="flex items-center gap-2 min-w-0">

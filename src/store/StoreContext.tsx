@@ -5,6 +5,7 @@ import {
   saveState,
   generateId,
   getUnreadCountByNovelId,
+  generatePlaceholderChapters,
 } from '../lib/storage'
 
 type Action =
@@ -19,7 +20,13 @@ type Action =
   | { type: 'UPDATE_NOTE'; payload: Note }
   | { type: 'DELETE_NOTE'; payload: string }
   | { type: 'ADD_CHAPTERS'; payload: Chapter[] }
+  | { type: 'ADD_CHAPTER'; payload: Chapter }
+  | { type: 'FILL_MISSING_CHAPTERS'; payload: { novelId: string; chapters: Chapter[] } }
   | { type: 'UPDATE_RADAR_CHECK'; payload: number }
+  | { type: 'DISMISS_MUST_ALERT'; payload: string }
+  | { type: 'DISMISS_FEED_ALERT'; payload: { novelId: string; unreadCount: number } }
+  | { type: 'RESET_MUST_ALERT'; payload: string }
+  | { type: 'RESET_FEED_ALERT'; payload: string }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -34,7 +41,9 @@ function reducer(state: AppState, action: Action): AppState {
           n.id === action.payload.id ? { ...action.payload, updatedAt: Date.now() } : n
         ),
       }
-    case 'DELETE_NOVEL':
+    case 'DELETE_NOVEL': {
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      delete newFeedAlerts[action.payload]
       return {
         ...state,
         novels: state.novels.filter((n) => n.id !== action.payload),
@@ -42,7 +51,10 @@ function reducer(state: AppState, action: Action): AppState {
         notes: state.notes.filter((n) => n.novelId !== action.payload),
         selectedNovelId:
           state.selectedNovelId === action.payload ? null : state.selectedNovelId,
+        dismissedMustAlerts: state.dismissedMustAlerts.filter((id) => id !== action.payload),
+        dismissedFeedAlerts: newFeedAlerts,
       }
+    }
     case 'SET_PRIORITY':
       return {
         ...state,
@@ -59,6 +71,8 @@ function reducer(state: AppState, action: Action): AppState {
       const newLastRead = novel && chapter.chapterNumber > novel.lastReadChapter
         ? chapter.chapterNumber
         : novel?.lastReadChapter ?? 0
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      delete newFeedAlerts[chapter.novelId]
       return {
         ...state,
         chapters: state.chapters.map((c) =>
@@ -69,10 +83,13 @@ function reducer(state: AppState, action: Action): AppState {
             ? { ...n, lastReadChapter: newLastRead, lastReadTime: Date.now(), updatedAt: Date.now() }
             : n
         ),
+        dismissedFeedAlerts: newFeedAlerts,
       }
     }
     case 'MARK_NOVEL_READ_TO': {
       const { novelId, chapter } = action.payload
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      delete newFeedAlerts[novelId]
       return {
         ...state,
         chapters: state.chapters.map((c) =>
@@ -85,6 +102,7 @@ function reducer(state: AppState, action: Action): AppState {
             ? { ...n, lastReadChapter: chapter, lastReadTime: Date.now(), updatedAt: Date.now() }
             : n
         ),
+        dismissedFeedAlerts: newFeedAlerts,
       }
     }
     case 'ADD_NOTE':
@@ -102,8 +120,88 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, notes: state.notes.filter((n) => n.id !== action.payload) }
     case 'ADD_CHAPTERS':
       return { ...state, chapters: [...state.chapters, ...action.payload] }
+    case 'ADD_CHAPTER': {
+      const chapter = action.payload
+      const novel = state.novels.find((n) => n.id === chapter.novelId)
+      const newLatest =
+        novel && (!novel.latestChapter || chapter.chapterNumber > novel.latestChapter)
+          ? chapter.chapterNumber
+          : novel?.latestChapter
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      if (novel?.priority === 'must') {
+        const newMust = state.dismissedMustAlerts.filter((id) => id !== novel.id)
+        return {
+          ...state,
+          chapters: [...state.chapters, chapter],
+          novels: state.novels.map((n) =>
+            n.id === chapter.novelId
+              ? { ...n, latestChapter: newLatest, updatedAt: Date.now() }
+              : n
+          ),
+          dismissedMustAlerts: newMust,
+        }
+      }
+      if (novel?.priority === 'feed') {
+        delete newFeedAlerts[novel.id]
+      }
+      return {
+        ...state,
+        chapters: [...state.chapters, chapter],
+        novels: state.novels.map((n) =>
+          n.id === chapter.novelId
+            ? { ...n, latestChapter: newLatest, updatedAt: Date.now() }
+            : n
+        ),
+        dismissedFeedAlerts: newFeedAlerts,
+      }
+    }
+    case 'FILL_MISSING_CHAPTERS': {
+      const { novelId, chapters } = action.payload
+      const existingNums = new Set(
+        state.chapters.filter((c) => c.novelId === novelId).map((c) => c.chapterNumber)
+      )
+      const newChapters = chapters.filter((c) => !existingNums.has(c.chapterNumber))
+      if (newChapters.length === 0) return state
+      const maxNum = Math.max(...newChapters.map((c) => c.chapterNumber))
+      const novel = state.novels.find((n) => n.id === novelId)
+      const newLatest =
+        novel && (!novel.latestChapter || maxNum > novel.latestChapter)
+          ? maxNum
+          : novel?.latestChapter
+      return {
+        ...state,
+        chapters: [...state.chapters, ...newChapters],
+        novels: state.novels.map((n) =>
+          n.id === novelId ? { ...n, latestChapter: newLatest, updatedAt: Date.now() } : n
+        ),
+      }
+    }
     case 'UPDATE_RADAR_CHECK':
       return { ...state, lastRadarCheck: action.payload }
+    case 'DISMISS_MUST_ALERT':
+      if (state.dismissedMustAlerts.includes(action.payload)) return state
+      return {
+        ...state,
+        dismissedMustAlerts: [...state.dismissedMustAlerts, action.payload],
+      }
+    case 'DISMISS_FEED_ALERT':
+      return {
+        ...state,
+        dismissedFeedAlerts: {
+          ...state.dismissedFeedAlerts,
+          [action.payload.novelId]: action.payload.unreadCount,
+        },
+      }
+    case 'RESET_MUST_ALERT':
+      return {
+        ...state,
+        dismissedMustAlerts: state.dismissedMustAlerts.filter((id) => id !== action.payload),
+      }
+    case 'RESET_FEED_ALERT': {
+      const newObj = { ...state.dismissedFeedAlerts }
+      delete newObj[action.payload]
+      return { ...state, dismissedFeedAlerts: newObj }
+    }
     default:
       return state
   }
@@ -112,7 +210,7 @@ function reducer(state: AppState, action: Action): AppState {
 interface StoreContextValue {
   state: AppState
   selectNovel: (id: string | null) => void
-  addNovel: (novel: Omit<Novel, 'id' | 'createdAt' | 'updatedAt'>) => void
+  addNovel: (novel: Omit<Novel, 'id' | 'createdAt' | 'updatedAt'>) => string
   updateNovel: (novel: Novel) => void
   deleteNovel: (id: string) => void
   setPriority: (id: string, priority: PriorityType) => void
@@ -121,10 +219,16 @@ interface StoreContextValue {
   addNote: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void
   updateNote: (note: Note) => void
   deleteNote: (id: string) => void
+  addChapter: (chapter: Omit<Chapter, 'id'>) => void
+  fillMissingChapters: (novelId: string, latestChapter: number) => void
   getUnreadForNovel: (novelId: string) => number
   getSelectedNovel: () => Novel | undefined
   getChaptersForNovel: (novelId: string) => Chapter[]
   getNotesForNovel: (novelId: string) => Note[]
+  dismissMustAlert: (novelId: string) => void
+  dismissFeedAlert: (novelId: string, unreadCount: number) => void
+  resetMustAlert: (novelId: string) => void
+  resetFeedAlert: (novelId: string) => void
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null)
@@ -150,6 +254,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updatedAt: now,
       }
       dispatch({ type: 'ADD_NOVEL', payload: newNovel })
+      return newNovel.id
     },
     []
   )
@@ -196,6 +301,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     dispatch({ type: 'DELETE_NOTE', payload: id })
   }, [])
 
+  const addChapter = useCallback(
+    (chapter: Omit<Chapter, 'id'>) => {
+      const newChapter: Chapter = {
+        ...chapter,
+        id: generateId(),
+      }
+      dispatch({ type: 'ADD_CHAPTER', payload: newChapter })
+    },
+    []
+  )
+
+  const fillMissingChapters = useCallback(
+    (novelId: string, latestChapter: number) => {
+      const novel = state.novels.find((n) => n.id === novelId)
+      if (!novel || !latestChapter || latestChapter <= novel.lastReadChapter) return
+      const placeholders = generatePlaceholderChapters(
+        novelId,
+        novel.lastReadChapter,
+        latestChapter
+      )
+      dispatch({ type: 'FILL_MISSING_CHAPTERS', payload: { novelId, chapters: placeholders } })
+    },
+    [state.novels]
+  )
+
   const getUnreadForNovel = useCallback(
     (novelId: string) => {
       const novel = state.novels.find((n) => n.id === novelId)
@@ -227,6 +357,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state.notes]
   )
 
+  const dismissMustAlert = useCallback((novelId: string) => {
+    dispatch({ type: 'DISMISS_MUST_ALERT', payload: novelId })
+  }, [])
+
+  const dismissFeedAlert = useCallback((novelId: string, unreadCount: number) => {
+    dispatch({ type: 'DISMISS_FEED_ALERT', payload: { novelId, unreadCount } })
+  }, [])
+
+  const resetMustAlert = useCallback((novelId: string) => {
+    dispatch({ type: 'RESET_MUST_ALERT', payload: novelId })
+  }, [])
+
+  const resetFeedAlert = useCallback((novelId: string) => {
+    dispatch({ type: 'RESET_FEED_ALERT', payload: novelId })
+  }, [])
+
   const value: StoreContextValue = {
     state,
     selectNovel,
@@ -239,10 +385,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     addNote,
     updateNote,
     deleteNote,
+    addChapter,
+    fillMissingChapters,
     getUnreadForNovel,
     getSelectedNovel,
     getChaptersForNovel,
     getNotesForNovel,
+    dismissMustAlert,
+    dismissFeedAlert,
+    resetMustAlert,
+    resetFeedAlert,
   }
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

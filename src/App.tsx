@@ -5,11 +5,14 @@ import UpdateRadar from './components/UpdateRadar'
 import NovelDetail from './components/NovelDetail'
 import NovelDialog from './components/NovelDialog'
 import PriorityAlert from './components/PriorityAlert'
+import AddChapterDialog from './components/AddChapterDialog'
 import { Signal, Cpu } from 'lucide-react'
 
 function AppContent() {
   const { state } = useStore()
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [addChapterOpen, setAddChapterOpen] = useState(false)
+  const [addChapterDefault, setAddChapterDefault] = useState<number | undefined>(undefined)
   const [radarExpanded, setRadarExpanded] = useState(true)
   const [showAlertOnLaunch] = useState(true)
 
@@ -24,6 +27,11 @@ function AppContent() {
 
   const pad = (n: number) => n.toString().padStart(2, '0')
   const timeStr = `${pad(currentTime.getHours())}:${pad(currentTime.getMinutes())}`
+
+  const handleAddChapter = (chapter?: number) => {
+    setAddChapterDefault(chapter)
+    setAddChapterOpen(true)
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-novel-dark">
@@ -64,7 +72,10 @@ function AppContent() {
             expanded={radarExpanded}
             onToggleExpanded={setRadarExpanded}
           />
-          <NovelDetail onEditClick={() => setDialogOpen(true)} />
+          <NovelDetail
+            onEditClick={() => setDialogOpen(true)}
+            onAddChapterClick={handleAddChapter}
+          />
         </div>
       </div>
 
@@ -74,6 +85,13 @@ function AppContent() {
         editingNovel={
           dialogOpen ? selectedNovel || null : null
         }
+      />
+
+      <AddChapterDialog
+        open={addChapterOpen}
+        onClose={() => setAddChapterOpen(false)}
+        novel={selectedNovel}
+        defaultChapter={addChapterDefault}
       />
 
       {showAlertOnLaunch && <PriorityAlert />}

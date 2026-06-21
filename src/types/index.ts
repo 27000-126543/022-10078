@@ -80,4 +80,6 @@ export interface AppState {
   notes: Note[]
   selectedNovelId: string | null
   lastRadarCheck: number
+  dismissedMustAlerts: string[]
+  dismissedFeedAlerts: Record<string, number>
 }
