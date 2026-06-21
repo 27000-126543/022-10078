@@ -22,6 +22,8 @@ type Action =
   | { type: 'ADD_CHAPTERS'; payload: Chapter[] }
   | { type: 'ADD_CHAPTER'; payload: Chapter }
   | { type: 'FILL_MISSING_CHAPTERS'; payload: { novelId: string; chapters: Chapter[] } }
+  | { type: 'UPSERT_CHAPTERS'; payload: { novelId: string; chapters: Chapter[] } }
+  | { type: 'BATCH_UPDATE_CHAPTERS'; payload: { novelId: string; updates: Array<{ id: string; wordCount?: number; publishTime?: number; title?: string }> } }
   | { type: 'UPDATE_RADAR_CHECK'; payload: number }
   | { type: 'DISMISS_MUST_ALERT'; payload: string }
   | { type: 'DISMISS_FEED_ALERT'; payload: { novelId: string; unreadCount: number } }
@@ -168,12 +170,97 @@ function reducer(state: AppState, action: Action): AppState {
         novel && (!novel.latestChapter || maxNum > novel.latestChapter)
           ? maxNum
           : novel?.latestChapter
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      let newMustAlerts = state.dismissedMustAlerts
+      if (novel?.priority === 'must') {
+        newMustAlerts = state.dismissedMustAlerts.filter((id) => id !== novel.id)
+      }
+      if (novel?.priority === 'feed') {
+        delete newFeedAlerts[novel.id]
+      }
       return {
         ...state,
         chapters: [...state.chapters, ...newChapters],
         novels: state.novels.map((n) =>
           n.id === novelId ? { ...n, latestChapter: newLatest, updatedAt: Date.now() } : n
         ),
+        dismissedMustAlerts: newMustAlerts,
+        dismissedFeedAlerts: newFeedAlerts,
+      }
+    }
+    case 'UPSERT_CHAPTERS': {
+      const { novelId, chapters } = action.payload
+      const existingMap = new Map(
+        state.chapters
+          .filter((c) => c.novelId === novelId)
+          .map((c) => [c.chapterNumber, c])
+      )
+      const updatedChapters: Chapter[] = []
+      const newChapters: Chapter[] = []
+      for (const ch of chapters) {
+        const existing = existingMap.get(ch.chapterNumber)
+        if (existing) {
+          updatedChapters.push({ ...existing, ...ch })
+        } else {
+          newChapters.push(ch)
+        }
+      }
+      const allNewChapters = [...updatedChapters, ...newChapters]
+      if (allNewChapters.length === 0) return state
+      const maxNum = Math.max(...allNewChapters.map((c) => c.chapterNumber))
+      const novel = state.novels.find((n) => n.id === novelId)
+      const newLatest =
+        novel && (!novel.latestChapter || maxNum > novel.latestChapter)
+          ? maxNum
+          : novel?.latestChapter
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      let newMustAlerts = state.dismissedMustAlerts
+      if (novel?.priority === 'must') {
+        newMustAlerts = state.dismissedMustAlerts.filter((id) => id !== novel.id)
+      }
+      if (novel?.priority === 'feed') {
+        delete newFeedAlerts[novel.id]
+      }
+      const updatedChapterMap = new Map(updatedChapters.map((c) => [c.id, c]))
+      const finalChapters = state.chapters.map((c) => updatedChapterMap.get(c.id) || c)
+      return {
+        ...state,
+        chapters: [...finalChapters, ...newChapters],
+        novels: state.novels.map((n) =>
+          n.id === novelId ? { ...n, latestChapter: newLatest, updatedAt: Date.now() } : n
+        ),
+        dismissedMustAlerts: newMustAlerts,
+        dismissedFeedAlerts: newFeedAlerts,
+      }
+    }
+    case 'BATCH_UPDATE_CHAPTERS': {
+      const { novelId, updates } = action.payload
+      const updateMap = new Map(updates.map((u) => [u.id, u]))
+      let hasChange = false
+      const newChapters = state.chapters.map((c) => {
+        const upd = updateMap.get(c.id)
+        if (!upd) return c
+        hasChange = true
+        return { ...c, ...upd }
+      })
+      if (!hasChange) return state
+      const novel = state.novels.find((n) => n.id === novelId)
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      let newMustAlerts = state.dismissedMustAlerts
+      if (novel?.priority === 'must') {
+        newMustAlerts = state.dismissedMustAlerts.filter((id) => id !== novel.id)
+      }
+      if (novel?.priority === 'feed') {
+        delete newFeedAlerts[novel.id]
+      }
+      return {
+        ...state,
+        chapters: newChapters,
+        novels: state.novels.map((n) =>
+          n.id === novelId ? { ...n, updatedAt: Date.now() } : n
+        ),
+        dismissedMustAlerts: newMustAlerts,
+        dismissedFeedAlerts: newFeedAlerts,
       }
     }
     case 'UPDATE_RADAR_CHECK':
@@ -221,10 +308,14 @@ interface StoreContextValue {
   deleteNote: (id: string) => void
   addChapter: (chapter: Omit<Chapter, 'id'>) => void
   fillMissingChapters: (novelId: string, latestChapter: number) => void
+  upsertChapters: (novelId: string, chapters: Omit<Chapter, 'id'>[]) => void
+  batchUpdateChapters: (novelId: string, updates: Array<{ id: string; wordCount?: number; publishTime?: number; title?: string }>) => void
   getUnreadForNovel: (novelId: string) => number
   getSelectedNovel: () => Novel | undefined
   getChaptersForNovel: (novelId: string) => Chapter[]
   getNotesForNovel: (novelId: string) => Note[]
+  getAllNotes: () => Note[]
+  getAllNovels: () => Novel[]
   dismissMustAlert: (novelId: string) => void
   dismissFeedAlert: (novelId: string, unreadCount: number) => void
   resetMustAlert: (novelId: string) => void
@@ -326,6 +417,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state.novels]
   )
 
+  const upsertChapters = useCallback(
+    (novelId: string, chapters: Omit<Chapter, 'id'>[]) => {
+      const fullChapters: Chapter[] = chapters.map((c) => ({
+        ...c,
+        id: generateId(),
+      }))
+      dispatch({ type: 'UPSERT_CHAPTERS', payload: { novelId, chapters: fullChapters } })
+    },
+    []
+  )
+
+  const batchUpdateChapters = useCallback(
+    (novelId: string, updates: Array<{ id: string; wordCount?: number; publishTime?: number; title?: string }>) => {
+      dispatch({ type: 'BATCH_UPDATE_CHAPTERS', payload: { novelId, updates } })
+    },
+    []
+  )
+
   const getUnreadForNovel = useCallback(
     (novelId: string) => {
       const novel = state.novels.find((n) => n.id === novelId)
@@ -357,6 +466,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state.notes]
   )
 
+  const getAllNotes = useCallback(() => {
+    return [...state.notes].sort((a, b) => b.updatedAt - a.updatedAt)
+  }, [state.notes])
+
+  const getAllNovels = useCallback(() => {
+    return state.novels
+  }, [state.novels])
+
   const dismissMustAlert = useCallback((novelId: string) => {
     dispatch({ type: 'DISMISS_MUST_ALERT', payload: novelId })
   }, [])
@@ -387,10 +504,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     deleteNote,
     addChapter,
     fillMissingChapters,
+    upsertChapters,
+    batchUpdateChapters,
     getUnreadForNovel,
     getSelectedNovel,
     getChaptersForNovel,
     getNotesForNovel,
+    getAllNotes,
+    getAllNovels,
     dismissMustAlert,
     dismissFeedAlert,
     resetMustAlert,

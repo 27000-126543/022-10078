@@ -6,6 +6,7 @@ import {
   CategoryType,
   PRIORITY_COLORS,
   PRIORITY_LABELS,
+  PriorityType,
   Novel,
   Chapter,
 } from '../types'
@@ -22,10 +23,17 @@ import {
   Eye,
   Check,
   ListFilter,
+  Globe,
+  Sparkles,
+  Utensils,
+  BookMarked,
+  X,
 } from 'lucide-react'
 
 type SortType = 'time' | 'words'
 type FilterCat = 'all' | CategoryType
+type FilterSource = 'all' | string
+type FilterPriority = 'all' | PriorityType
 
 interface Props {
   expanded: boolean
@@ -36,6 +44,8 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
   const { state, selectNovel, markNovelReadTo, getUnreadForNovel } = useStore()
   const [sortBy, setSortBy] = useState<SortType>('time')
   const [filterCat, setFilterCat] = useState<FilterCat>('all')
+  const [filterSource, setFilterSource] = useState<FilterSource>('all')
+  const [filterPriority, setFilterPriority] = useState<FilterPriority>('all')
   const [wordFilter, setWordFilter] = useState({ min: 0, max: 99999999 })
   const [onlyUnread, setOnlyUnread] = useState(false)
   const [hideWatch, setHideWatch] = useState(false)
@@ -48,12 +58,20 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     return m
   }, [state.novels])
 
+  const sourceOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const n of state.novels) set.add(n.source)
+    return Array.from(set).sort()
+  }, [state.novels])
+
   const filteredChapters = useMemo(() => {
     let list = recentChapters.filter((c) => {
       const novel = novelMap[c.novelId]
       if (!novel) return false
       if (hideWatch && novel.priority === 'watch') return false
       if (onlyUnread && c.isRead) return false
+      if (filterPriority !== 'all' && novel.priority !== filterPriority) return false
+      if (filterSource !== 'all' && novel.source !== filterSource) return false
       const passesCat = filterCat === 'all' || novel.category === filterCat
       const passesWf = c.wordCount >= wordFilter.min && c.wordCount <= wordFilter.max
       return passesCat && passesWf
@@ -64,7 +82,17 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
       list = [...list].sort((a, b) => b.wordCount - a.wordCount)
     }
     return list
-  }, [recentChapters, sortBy, filterCat, wordFilter, onlyUnread, hideWatch, novelMap])
+  }, [
+    recentChapters,
+    sortBy,
+    filterCat,
+    filterSource,
+    filterPriority,
+    wordFilter,
+    onlyUnread,
+    hideWatch,
+    novelMap,
+  ])
 
   const groupedByNovel = useMemo(() => {
     const groups = new Map<string, { novel: Novel; chapters: Chapter[] }>()
@@ -95,6 +123,14 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     (w) => w.min === wordFilter.min && w.max === wordFilter.max
   )
 
+  const priorityOptions: { key: FilterPriority; label: string; color: string; icon: React.ReactNode }[] = [
+    { key: 'all', label: '全部', color: '#8b8fa3', icon: <ListFilter className="w-3.5 h-3.5" /> },
+    { key: 'must', label: '必看', color: PRIORITY_COLORS.must, icon: <Sparkles className="w-3.5 h-3.5" /> },
+    { key: 'feed', label: '养肥', color: PRIORITY_COLORS.feed, icon: <Utensils className="w-3.5 h-3.5" /> },
+    { key: 'watch', label: '观察', color: PRIORITY_COLORS.watch, icon: <Eye className="w-3.5 h-3.5" /> },
+    { key: 'none', label: '普通', color: PRIORITY_COLORS.none, icon: <BookMarked className="w-3.5 h-3.5" /> },
+  ]
+
   const handleMarkAllRead = () => {
     for (const [novelId, { novel }] of groupedByNovel) {
       if (novel.latestChapter) {
@@ -107,6 +143,23 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     if (latestChapter) {
       markNovelReadTo(novelId, latestChapter)
     }
+  }
+
+  const hasActiveFilters =
+    filterSource !== 'all' ||
+    filterPriority !== 'all' ||
+    filterCat !== 'all' ||
+    onlyUnread ||
+    hideWatch ||
+    currentWfIdx !== 0
+
+  const clearAllFilters = () => {
+    setFilterSource('all')
+    setFilterPriority('all')
+    setFilterCat('all')
+    setOnlyUnread(false)
+    setHideWatch(false)
+    setWordFilter({ min: 0, max: 99999999 })
   }
 
   return (
@@ -127,10 +180,13 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
               <span className="text-xs text-novel-muted">
                 最近24小时 · {totalNovels}部作品 · {totalNew}章
                 {onlyUnread && <span className="text-novel-accent"> · 未读{unreadOnlyCount}章</span>}
+                {hasActiveFilters && (
+                  <span className="text-novel-feed ml-1">（已筛选）</span>
+                )}
               </span>
             </div>
             <p className="text-xs text-novel-muted mt-0.5">
-              实时监控追更列表，一键批量标记已读
+              实时监控追更列表，支持来源+优先级组合筛选
             </p>
           </div>
         </div>
@@ -189,13 +245,25 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
             隐藏观察
           </button>
 
+          {hasActiveFilters && (
+            <button
+              onClick={clearAllFilters}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-novel-muted hover:text-novel-text hover:bg-white/5 transition-all"
+              title="清除所有筛选"
+            >
+              <X className="w-3.5 h-3.5" />
+              清除筛选
+            </button>
+          )}
+
           {totalNovels > 0 && (
             <button
               onClick={handleMarkAllRead}
               className="flex items-center gap-1 px-3 py-1.5 bg-novel-feed/20 text-novel-feed rounded-lg text-xs font-medium hover:bg-novel-feed/30 transition-colors"
+              title="将当前筛选结果全部标记已读"
             >
               <CheckSquare className="w-3.5 h-3.5" />
-              全部标读
+              批量标读
             </button>
           )}
 
@@ -220,6 +288,66 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
 
       {expanded && (
         <div className="px-5 py-3">
+          <div className="flex flex-wrap items-center gap-4 mb-3">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-xs text-novel-muted mr-1">来源:</span>
+              <button
+                onClick={() => setFilterSource('all')}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                  filterSource === 'all'
+                    ? 'text-white'
+                    : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                }`}
+                style={{
+                  backgroundColor: filterSource === 'all' ? '#8b8fa3' : undefined,
+                }}
+              >
+                全部
+              </button>
+              {sourceOptions.slice(0, 6).map((src) => (
+                <button
+                  key={src}
+                  onClick={() => setFilterSource(filterSource === src ? 'all' : src)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                    filterSource === src
+                      ? 'text-white'
+                      : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                  }`}
+                  style={{
+                    backgroundColor: filterSource === src ? CATEGORY_COLORS.xuanyi : undefined,
+                  }}
+                  title={src}
+                >
+                  <Globe className="w-3 h-3" />
+                  {src.length > 4 ? src.slice(0, 4) + '…' : src}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-xs text-novel-muted mr-1">优先级:</span>
+              {priorityOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() =>
+                    setFilterPriority(filterPriority === opt.key ? 'all' : opt.key)
+                  }
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                    filterPriority === opt.key
+                      ? 'text-white'
+                      : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                  }`}
+                  style={{
+                    backgroundColor: filterPriority === opt.key ? opt.color : undefined,
+                  }}
+                >
+                  {opt.icon}
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-4 mb-3">
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-xs text-novel-muted mr-1">分类:</span>
@@ -263,12 +391,52 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
             </div>
           </div>
 
+          {hasActiveFilters && (
+            <div className="mb-3 p-2 px-3 bg-novel-accent/10 border border-novel-accent/30 rounded-lg text-xs flex items-center gap-2">
+              <ListFilter className="w-3.5 h-3.5 text-novel-accent" />
+              <span className="text-novel-muted">当前筛选：</span>
+              {filterSource !== 'all' && (
+                <span className="tag bg-novel-dark text-novel-text">{filterSource}</span>
+              )}
+              {filterPriority !== 'all' && (
+                <span
+                  className="tag"
+                  style={{
+                    backgroundColor: `${PRIORITY_COLORS[filterPriority]}22`,
+                    color: PRIORITY_COLORS[filterPriority],
+                  }}
+                >
+                  {PRIORITY_LABELS[filterPriority]}
+                </span>
+              )}
+              {filterCat !== 'all' && (
+                <span
+                  className="tag"
+                  style={{
+                    backgroundColor: `${CATEGORY_COLORS[filterCat]}22`,
+                    color: CATEGORY_COLORS[filterCat],
+                  }}
+                >
+                  {CATEGORY_LABELS[filterCat]}
+                </span>
+              )}
+              {onlyUnread && <span className="tag bg-novel-accent/20 text-novel-accent">只看未读</span>}
+              {hideWatch && <span className="tag bg-novel-watch/20 text-novel-watch">隐藏观察</span>}
+              {currentWfIdx !== 0 && (
+                <span className="tag bg-novel-dark text-novel-text">{wordPresets[currentWfIdx].label}</span>
+              )}
+              <span className="text-novel-accent font-medium ml-auto">
+                共 {totalNew} 章 · {totalNovels} 部作品
+              </span>
+            </div>
+          )}
+
           {filteredChapters.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-novel-muted">
               <Radar className="w-8 h-8 mb-2 opacity-50" />
               <p className="text-sm">
-                {onlyUnread || hideWatch
-                  ? '当前筛选条件下无更新'
+                {hasActiveFilters
+                  ? '当前筛选条件下无更新，请调整筛选条件'
                   : '24小时内暂无符合条件的更新'}
               </p>
             </div>
@@ -320,6 +488,15 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
                               {PRIORITY_LABELS[novel.priority]}
                             </span>
                           )}
+                          <span
+                            className="tag flex-shrink-0 text-[10px]"
+                            style={{
+                              backgroundColor: `${CATEGORY_COLORS[novel.category]}22`,
+                              color: CATEGORY_COLORS[novel.category],
+                            }}
+                          >
+                            {CATEGORY_LABELS[novel.category]}
+                          </span>
                           {unreadCount > 0 && (
                             <span className="tag bg-novel-must text-white flex-shrink-0">
                               +{unreadCount}

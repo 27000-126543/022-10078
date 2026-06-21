@@ -53,6 +53,7 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
     addNote,
     updateNote,
     deleteNote,
+    fillMissingChapters,
   } = useStore()
   const novel = getSelectedNovel()
   const [tab, setTab] = useState<'chapters' | 'notes'>('chapters')
@@ -63,11 +64,24 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
   const [editContent, setEditContent] = useState('')
   const [noteFilterChapter, setNoteFilterChapter] = useState<number | ''>('')
   const [quickNoteFor, setQuickNoteFor] = useState<Chapter | null>(null)
+  const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set())
 
   const chapters = novel ? getChaptersForNovel(novel.id) : []
   const notes = novel ? getNotesForNovel(novel.id) : []
   const unreadCount = novel ? getUnreadForNovel(novel.id) : 0
   const feedProgress = novel ? getFeedProgress(novel, unreadCount) : null
+
+  React.useEffect(() => {
+    if (novel && novel.latestChapter && novel.latestChapter > novel.lastReadChapter) {
+      const novelKey = `${novel.id}-${novel.latestChapter}`
+      if (!autoFilled.has(novelKey)) {
+        setTimeout(() => {
+          fillMissingChapters(novel.id, novel.latestChapter!)
+          setAutoFilled((prev) => new Set(prev).add(novelKey))
+        }, 0)
+      }
+    }
+  }, [novel, fillMissingChapters, autoFilled])
 
   const unreadChapters = useMemo(() => {
     if (!novel) return []
@@ -462,7 +476,6 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
                             setQuickNoteFor(isQuickNote ? null : ch)
                             setNewNoteType('plot')
                             setNewNoteContent('')
-                            if (!isQuickNote) setTab('notes')
                           }}
                           className={`p-2 rounded-lg flex-shrink-0 transition-colors ${
                             isQuickNote

@@ -6,17 +6,20 @@ import NovelDetail from './components/NovelDetail'
 import NovelDialog from './components/NovelDialog'
 import PriorityAlert from './components/PriorityAlert'
 import AddChapterDialog from './components/AddChapterDialog'
-import { Signal, Cpu } from 'lucide-react'
+import NoteSearchDialog from './components/NoteSearchDialog'
+import { Signal, Cpu, Search, Pen } from 'lucide-react'
 
 function AppContent() {
   const { state } = useStore()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [addChapterOpen, setAddChapterOpen] = useState(false)
   const [addChapterDefault, setAddChapterDefault] = useState<number | undefined>(undefined)
+  const [noteSearchOpen, setNoteSearchOpen] = useState(false)
   const [radarExpanded, setRadarExpanded] = useState(true)
   const [showAlertOnLaunch] = useState(true)
 
   const selectedNovel = state.novels.find((n) => n.id === state.selectedNovelId)
+  const totalNotes = state.notes.length
 
   const [currentTime, setCurrentTime] = useState(new Date())
 
@@ -50,6 +53,27 @@ function AppContent() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setNoteSearchOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-novel-muted hover:text-novel-accent hover:bg-white/5 transition-colors"
+            title="搜索追更笔记"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">笔记检索</span>
+            {totalNotes > 0 && (
+              <span className="bg-novel-accent/20 text-novel-accent text-[9px] px-1.5 py-0.5 rounded-full">
+                {totalNotes}
+              </span>
+            )}
+          </button>
+          <div className="h-4 w-px bg-novel-border" />
+          <div className="flex items-center gap-1">
+            <Pen className="w-3 h-3 text-novel-accent" />
+            <span className="text-[10px] text-novel-muted">
+              {totalNotes} 条笔记
+            </span>
+          </div>
+          <div className="h-4 w-px bg-novel-border" />
           <div className="flex items-center gap-1">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-[10px] text-novel-muted">
@@ -92,6 +116,11 @@ function AppContent() {
         onClose={() => setAddChapterOpen(false)}
         novel={selectedNovel}
         defaultChapter={addChapterDefault}
+      />
+
+      <NoteSearchDialog
+        open={noteSearchOpen}
+        onClose={() => setNoteSearchOpen(false)}
       />
 
       {showAlertOnLaunch && <PriorityAlert />}
