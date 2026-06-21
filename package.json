@@ -1,0 +1,33 @@
+{
+  "name": "novel-tracker-console",
+  "version": "1.0.0",
+  "description": "桌面端网文追更控制台",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "vite --config vite.web.config.ts --host 0.0.0.0",
+    "build": "tsc -b && vite build && electron-builder",
+    "build:web": "tsc -b && vite build --config vite.web.config.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.454.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.0.1",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}
