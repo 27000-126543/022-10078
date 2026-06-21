@@ -19,10 +19,11 @@ import {
 interface Props {
   open: boolean
   onClose: () => void
+  onJumpToNote?: (note: Note) => void
 }
 
-const NoteSearchDialog: React.FC<Props> = ({ open, onClose }) => {
-  const { getAllNotes, getAllNovels, selectNovel } = useStore()
+const NoteSearchDialog: React.FC<Props> = ({ open, onClose, onJumpToNote }) => {
+  const { getAllNotes, getAllNovels } = useStore()
   const [keyword, setKeyword] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | Note['type']>('all')
   const [minChapter, setMinChapter] = useState<number | ''>('')
@@ -60,7 +61,7 @@ const NoteSearchDialog: React.FC<Props> = ({ open, onClose }) => {
   }
 
   const handleJumpToNote = (note: Note) => {
-    selectNovel(note.novelId)
+    onJumpToNote?.(note)
     onClose()
   }
 

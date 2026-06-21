@@ -16,6 +16,7 @@ type Action =
   | { type: 'SET_PRIORITY'; payload: { id: string; priority: PriorityType } }
   | { type: 'MARK_CHAPTER_READ'; payload: string }
   | { type: 'MARK_NOVEL_READ_TO'; payload: { novelId: string; chapter: number } }
+  | { type: 'BATCH_MARK_READ'; payload: string[] }
   | { type: 'ADD_NOTE'; payload: Note }
   | { type: 'UPDATE_NOTE'; payload: Note }
   | { type: 'DELETE_NOTE'; payload: string }
@@ -104,6 +105,36 @@ function reducer(state: AppState, action: Action): AppState {
             ? { ...n, lastReadChapter: chapter, lastReadTime: Date.now(), updatedAt: Date.now() }
             : n
         ),
+        dismissedFeedAlerts: newFeedAlerts,
+      }
+    }
+    case 'BATCH_MARK_READ': {
+      const ids = new Set(action.payload)
+      if (ids.size === 0) return state
+      let hasChange = false
+      const newChapters = state.chapters.map((c) => {
+        if (ids.has(c.id) && !c.isRead) {
+          hasChange = true
+          return { ...c, isRead: true }
+        }
+        return c
+      })
+      if (!hasChange) return state
+      const novelIds = new Set<string>()
+      for (const c of state.chapters) {
+        if (ids.has(c.id)) novelIds.add(c.novelId)
+      }
+      const newMustAlerts = state.dismissedMustAlerts.filter(
+        (id) => !novelIds.has(id)
+      )
+      const newFeedAlerts = { ...state.dismissedFeedAlerts }
+      for (const nid of novelIds) {
+        delete newFeedAlerts[nid]
+      }
+      return {
+        ...state,
+        chapters: newChapters,
+        dismissedMustAlerts: newMustAlerts,
         dismissedFeedAlerts: newFeedAlerts,
       }
     }
@@ -303,6 +334,7 @@ interface StoreContextValue {
   setPriority: (id: string, priority: PriorityType) => void
   markChapterRead: (chapterId: string) => void
   markNovelReadTo: (novelId: string, chapter: number) => void
+  batchMarkRead: (chapterIds: string[]) => void
   addNote: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void
   updateNote: (note: Note) => void
   deleteNote: (id: string) => void
@@ -368,6 +400,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const markNovelReadTo = useCallback((novelId: string, chapter: number) => {
     dispatch({ type: 'MARK_NOVEL_READ_TO', payload: { novelId, chapter } })
+  }, [])
+
+  const batchMarkRead = useCallback((chapterIds: string[]) => {
+    dispatch({ type: 'BATCH_MARK_READ', payload: chapterIds })
   }, [])
 
   const addNote = useCallback(
@@ -499,6 +535,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPriority,
     markChapterRead,
     markNovelReadTo,
+    batchMarkRead,
     addNote,
     updateNote,
     deleteNote,

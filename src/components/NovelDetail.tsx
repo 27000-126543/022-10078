@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../store/StoreContext'
 import {
   CATEGORY_COLORS,
@@ -34,14 +34,27 @@ import {
   Zap,
   Plus,
   BookPlus,
+  Clock,
+  List,
+  Layers,
+  ArrowUp,
 } from 'lucide-react'
+
+type NoteViewMode = 'recent' | 'chapter' | 'type'
 
 interface Props {
   onEditClick: () => void
   onAddChapterClick: (chapter?: number) => void
+  highlightChapter?: number | null
+  highlightNoteId?: string | null
 }
 
-const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
+const NovelDetail: React.FC<Props> = ({
+  onEditClick,
+  onAddChapterClick,
+  highlightChapter,
+  highlightNoteId,
+}) => {
   const {
     getSelectedNovel,
     getChaptersForNovel,
@@ -65,11 +78,36 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
   const [noteFilterChapter, setNoteFilterChapter] = useState<number | ''>('')
   const [quickNoteFor, setQuickNoteFor] = useState<Chapter | null>(null)
   const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set())
+  const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>('recent')
+  const [localHighlightChapter, setLocalHighlightChapter] = useState<number | null>(null)
+  const [localHighlightNoteId, setLocalHighlightNoteId] = useState<string | null>(null)
+
+  const chapterListRef = useRef<HTMLDivElement>(null)
+  const chapterRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const chapters = novel ? getChaptersForNovel(novel.id) : []
   const notes = novel ? getNotesForNovel(novel.id) : []
   const unreadCount = novel ? getUnreadForNovel(novel.id) : 0
   const feedProgress = novel ? getFeedProgress(novel, unreadCount) : null
+
+  useEffect(() => {
+    if (highlightChapter != null) {
+      setTab('chapters')
+      setLocalHighlightChapter(highlightChapter)
+      setLocalHighlightNoteId(highlightNoteId ?? null)
+      setTimeout(() => {
+        const el = chapterRefs.current.get(highlightChapter)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 100)
+      const timer = setTimeout(() => {
+        setLocalHighlightChapter(null)
+        setLocalHighlightNoteId(null)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [highlightChapter, highlightNoteId])
 
   React.useEffect(() => {
     if (novel && novel.latestChapter && novel.latestChapter > novel.lastReadChapter) {
@@ -98,6 +136,26 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
     notes.forEach((n) => n.chapterNumber && set.add(n.chapterNumber))
     return Array.from(set).sort((a, b) => b - a)
   }, [notes])
+
+  const groupedNotesByChapter = useMemo(() => {
+    const map = new Map<number, Note[]>()
+    const sorted = [...filteredNotes].sort((a, b) => (b.chapterNumber ?? 0) - (a.chapterNumber ?? 0))
+    for (const note of sorted) {
+      const ch = note.chapterNumber ?? 0
+      if (!map.has(ch)) map.set(ch, [])
+      map.get(ch)!.push(note)
+    }
+    return map
+  }, [filteredNotes])
+
+  const groupedNotesByType = useMemo(() => {
+    const map = new Map<Note['type'], Note[]>()
+    for (const note of filteredNotes) {
+      if (!map.has(note.type)) map.set(note.type, [])
+      map.get(note.type)!.push(note)
+    }
+    return map
+  }, [filteredNotes])
 
   if (!novel) {
     return (
@@ -147,6 +205,18 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
     setQuickNoteFor(null)
   }
 
+  const handleJumpToChapterFromNote = (chapterNumber: number) => {
+    setTab('chapters')
+    setLocalHighlightChapter(chapterNumber)
+    setTimeout(() => {
+      const el = chapterRefs.current.get(chapterNumber)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 100)
+    setTimeout(() => setLocalHighlightChapter(null), 5000)
+  }
+
   const noteTypeLabels: Record<
     Note['type'],
     { label: string; color: string; icon: React.ReactNode }
@@ -154,6 +224,112 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
     plot: { label: '剧情', color: '#7c5cff', icon: <Zap className="w-3 h-3" /> },
     character: { label: '角色', color: '#ff6b9d', icon: <Users className="w-3 h-3" /> },
     general: { label: '杂记', color: '#4ecdc4', icon: <MessageSquare className="w-3 h-3" /> },
+  }
+
+  const viewModeOptions: { key: NoteViewMode; label: string; icon: React.ReactNode }[] = [
+    { key: 'recent', label: '最近', icon: <Clock className="w-3.5 h-3.5" /> },
+    { key: 'chapter', label: '按章节', icon: <List className="w-3.5 h-3.5" /> },
+    { key: 'type', label: '按类型', icon: <Layers className="w-3.5 h-3.5" /> },
+  ]
+
+  const renderNoteCard = (note: Note, showChapterLink = false) => {
+    const isEditing = editingNoteId === note.id
+    const typeInfo = noteTypeLabels[note.type]
+    const isHighlighted = localHighlightNoteId === note.id
+    return (
+      <div
+        key={note.id}
+        className={`card p-4 transition-all ${
+          isHighlighted ? 'ring-2 ring-novel-accent shadow-lg shadow-novel-accent/20' : ''
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className="tag"
+              style={{
+                backgroundColor: `${typeInfo.color}22`,
+                color: typeInfo.color,
+              }}
+            >
+              {typeInfo.icon}
+              {typeInfo.label}
+            </span>
+            {note.chapterNumber && (
+              <span
+                className={`tag cursor-pointer hover:opacity-80 ${
+                  showChapterLink
+                    ? 'bg-novel-accent/15 text-novel-accent hover:bg-novel-accent/25'
+                    : 'bg-novel-accent/15 text-novel-accent'
+                }`}
+                onClick={showChapterLink ? () => handleJumpToChapterFromNote(note.chapterNumber!) : undefined}
+              >
+                📖 第{note.chapterNumber}章
+                {showChapterLink && <ArrowUp className="w-3 h-3 inline ml-0.5 -rotate-45" />}
+              </span>
+            )}
+            <span className="text-xs text-novel-muted">
+              {formatTime(note.updatedAt)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {isEditing ? (
+              <>
+                <button
+                  onClick={() => {
+                    if (!editContent.trim()) return
+                    updateNote({ ...note, content: editContent.trim() })
+                    setEditingNoteId(null)
+                  }}
+                  className="p-1.5 hover:bg-novel-accent/20 text-novel-accent rounded-lg"
+                  title="保存"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setEditingNoteId(null)}
+                  className="p-1.5 hover:bg-white/10 text-novel-muted rounded-lg"
+                  title="取消"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setEditingNoteId(note.id)
+                    setEditContent(note.content)
+                  }}
+                  className="p-1.5 hover:bg-white/10 text-novel-muted hover:text-novel-text rounded-lg"
+                  title="编辑"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => deleteNote(note.id)}
+                  className="p-1.5 hover:bg-novel-must/20 text-novel-muted hover:text-novel-must rounded-lg"
+                  title="删除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+        {isEditing ? (
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            className="w-full input-field min-h-[80px] resize-y text-sm"
+          />
+        ) : (
+          <p className="text-sm text-novel-text whitespace-pre-wrap leading-relaxed">
+            {note.content}
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -396,7 +572,7 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-5" ref={chapterListRef}>
           {tab === 'chapters' ? (
             <div className="space-y-1">
               {chapters.length === 0 ? (
@@ -417,11 +593,17 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
                     ch.chapterNumber > novel.lastReadChapter && !ch.isRead
                   const hasNote = notes.some((n) => n.chapterNumber === ch.chapterNumber)
                   const isQuickNote = quickNoteFor?.id === ch.id
+                  const isHighlighted = localHighlightChapter === ch.chapterNumber
                   return (
                     <div key={ch.id}>
                       <div
+                        ref={(el) => {
+                          if (el) chapterRefs.current.set(ch.chapterNumber, el)
+                        }}
                         className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
-                          isUnread
+                          isHighlighted
+                            ? 'bg-novel-accent/15 border-novel-accent ring-2 ring-novel-accent/40 shadow-lg shadow-novel-accent/10'
+                            : isUnread
                             ? 'bg-novel-accent/5 border-novel-accent/30 hover:bg-novel-accent/10'
                             : 'border-transparent hover:bg-white/5'
                         }`}
@@ -461,6 +643,11 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
                             {hasNote && (
                               <span className="tag bg-novel-accent/20 text-novel-accent text-[10px]">
                                 📝 有笔记
+                              </span>
+                            )}
+                            {isHighlighted && (
+                              <span className="tag bg-novel-accent/30 text-novel-accent text-[10px] animate-pulse">
+                                🔍 定位
                               </span>
                             )}
                           </div>
@@ -611,38 +798,60 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
                 </div>
               </div>
 
-              {noteChapterOptions.length > 0 && (
+              <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-novel-muted">按章节筛选:</span>
-                  <button
-                    onClick={() => setNoteFilterChapter('')}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                      noteFilterChapter === ''
-                        ? 'bg-novel-accent text-white'
-                        : 'bg-novel-dark text-novel-muted hover:text-novel-text'
-                    }`}
-                  >
-                    全部
-                  </button>
-                  {noteChapterOptions.map((chNum) => (
+                  {noteChapterOptions.length > 0 && (
+                    <>
+                      <span className="text-xs text-novel-muted">章节:</span>
+                      <button
+                        onClick={() => setNoteFilterChapter('')}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                          noteFilterChapter === ''
+                            ? 'bg-novel-accent text-white'
+                            : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                        }`}
+                      >
+                        全部
+                      </button>
+                      {noteChapterOptions.slice(0, 12).map((chNum) => (
+                        <button
+                          key={chNum}
+                          onClick={() =>
+                            setNoteFilterChapter(
+                              noteFilterChapter === chNum ? '' : chNum
+                            )
+                          }
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                            noteFilterChapter === chNum
+                              ? 'bg-novel-accent text-white'
+                              : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                          }`}
+                        >
+                          第{chNum}章
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 bg-novel-card rounded-lg p-0.5">
+                  {viewModeOptions.map((opt) => (
                     <button
-                      key={chNum}
-                      onClick={() =>
-                        setNoteFilterChapter(
-                          noteFilterChapter === chNum ? '' : chNum
-                        )
-                      }
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                        noteFilterChapter === chNum
-                          ? 'bg-novel-accent text-white'
-                          : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                      key={opt.key}
+                      onClick={() => setNoteViewMode(opt.key)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                        noteViewMode === opt.key
+                          ? 'bg-novel-accent/20 text-novel-accent'
+                          : 'text-novel-muted hover:text-novel-text'
                       }`}
+                      title={opt.label}
                     >
-                      第{chNum}章
+                      {opt.icon}
+                      <span className="hidden sm:inline">{opt.label}</span>
                     </button>
                   ))}
                 </div>
-              )}
+              </div>
 
               {filteredNotes.length === 0 ? (
                 <div className="text-center py-12 text-novel-muted">
@@ -653,90 +862,63 @@ const NovelDetail: React.FC<Props> = ({ onEditClick, onAddChapterClick }) => {
                       : '还没有笔记，记录一下你的想法吧'}
                   </p>
                 </div>
-              ) : (
+              ) : noteViewMode === 'recent' ? (
                 <div className="space-y-3">
-                  {filteredNotes.map((note) => {
-                    const isEditing = editingNoteId === note.id
-                    const typeInfo = noteTypeLabels[note.type]
+                  {[...filteredNotes]
+                    .sort((a, b) => b.updatedAt - a.updatedAt)
+                    .map((note) => renderNoteCard(note, true))}
+                </div>
+              ) : noteViewMode === 'chapter' ? (
+                <div className="space-y-4">
+                  {Array.from(groupedNotesByChapter.entries()).map(([chNum, chNotes]) => (
+                    <div key={chNum}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <button
+                          onClick={() => handleJumpToChapterFromNote(chNum)}
+                          className="flex items-center gap-1.5 text-xs font-medium text-novel-accent hover:text-novel-accent/80 transition-colors"
+                        >
+                          <Hash className="w-3.5 h-3.5" />
+                          第{chNum}章
+                          <ArrowUp className="w-3 h-3 -rotate-45" />
+                        </button>
+                        <span className="text-[10px] text-novel-muted">
+                          {chNotes.length} 条笔记
+                        </span>
+                        <div className="flex-1 h-px bg-novel-border" />
+                      </div>
+                      <div className="space-y-2 ml-4">
+                        {chNotes.map((note) => renderNoteCard(note))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {Array.from(groupedNotesByType.entries()).map(([type, typeNotes]) => {
+                    const typeInfo = noteTypeLabels[type]
                     return (
-                      <div key={note.id} className="card p-4">
-                        <div className="flex items-start justify-between gap-3 mb-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className="tag"
-                              style={{
-                                backgroundColor: `${typeInfo.color}22`,
-                                color: typeInfo.color,
-                              }}
-                            >
-                              {typeInfo.icon}
-                              {typeInfo.label}
-                            </span>
-                            {note.chapterNumber && (
-                              <span className="tag bg-novel-accent/15 text-novel-accent">
-                                📖 第{note.chapterNumber}章
-                              </span>
-                            )}
-                            <span className="text-xs text-novel-muted">
-                              {formatTime(note.updatedAt)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {isEditing ? (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    if (!editContent.trim()) return
-                                    updateNote({ ...note, content: editContent.trim() })
-                                    setEditingNoteId(null)
-                                  }}
-                                  className="p-1.5 hover:bg-novel-accent/20 text-novel-accent rounded-lg"
-                                  title="保存"
-                                >
-                                  <Check className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => setEditingNoteId(null)}
-                                  className="p-1.5 hover:bg-white/10 text-novel-muted rounded-lg"
-                                  title="取消"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    setEditingNoteId(note.id)
-                                    setEditContent(note.content)
-                                  }}
-                                  className="p-1.5 hover:bg-white/10 text-novel-muted hover:text-novel-text rounded-lg"
-                                  title="编辑"
-                                >
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => deleteNote(note.id)}
-                                  className="p-1.5 hover:bg-novel-must/20 text-novel-muted hover:text-novel-must rounded-lg"
-                                  title="删除"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
-                            )}
-                          </div>
+                      <div key={type}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span
+                            className="flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full"
+                            style={{
+                              backgroundColor: `${typeInfo.color}22`,
+                              color: typeInfo.color,
+                            }}
+                          >
+                            {typeInfo.icon}
+                            {typeInfo.label}
+                          </span>
+                          <span className="text-[10px] text-novel-muted">
+                            {typeNotes.length} 条
+                          </span>
+                          <div className="flex-1 h-px bg-novel-border" />
                         </div>
-                        {isEditing ? (
-                          <textarea
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            className="w-full input-field min-h-[80px] resize-y text-sm"
-                          />
-                        ) : (
-                          <p className="text-sm text-novel-text whitespace-pre-wrap leading-relaxed">
-                            {note.content}
-                          </p>
-                        )}
+                        <div className="space-y-2 ml-4">
+                          {[...typeNotes]
+                            .sort((a, b) => b.updatedAt - a.updatedAt)
+                            .map((note) => renderNoteCard(note, true))}
+                        </div>
                       </div>
                     )
                   })}

@@ -7,16 +7,19 @@ import NovelDialog from './components/NovelDialog'
 import PriorityAlert from './components/PriorityAlert'
 import AddChapterDialog from './components/AddChapterDialog'
 import NoteSearchDialog from './components/NoteSearchDialog'
+import { Note } from './types'
 import { Signal, Cpu, Search, Pen } from 'lucide-react'
 
 function AppContent() {
-  const { state } = useStore()
+  const { state, selectNovel } = useStore()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [addChapterOpen, setAddChapterOpen] = useState(false)
   const [addChapterDefault, setAddChapterDefault] = useState<number | undefined>(undefined)
   const [noteSearchOpen, setNoteSearchOpen] = useState(false)
   const [radarExpanded, setRadarExpanded] = useState(true)
   const [showAlertOnLaunch] = useState(true)
+  const [highlightChapter, setHighlightChapter] = useState<number | null>(null)
+  const [highlightNoteId, setHighlightNoteId] = useState<string | null>(null)
 
   const selectedNovel = state.novels.find((n) => n.id === state.selectedNovelId)
   const totalNotes = state.notes.length
@@ -34,6 +37,16 @@ function AppContent() {
   const handleAddChapter = (chapter?: number) => {
     setAddChapterDefault(chapter)
     setAddChapterOpen(true)
+  }
+
+  const handleJumpToNote = (note: Note) => {
+    selectNovel(note.novelId)
+    setHighlightChapter(note.chapterNumber ?? null)
+    setHighlightNoteId(note.id)
+    setTimeout(() => {
+      setHighlightChapter(null)
+      setHighlightNoteId(null)
+    }, 5000)
   }
 
   return (
@@ -99,6 +112,8 @@ function AppContent() {
           <NovelDetail
             onEditClick={() => setDialogOpen(true)}
             onAddChapterClick={handleAddChapter}
+            highlightChapter={highlightChapter}
+            highlightNoteId={highlightNoteId}
           />
         </div>
       </div>
@@ -121,6 +136,7 @@ function AppContent() {
       <NoteSearchDialog
         open={noteSearchOpen}
         onClose={() => setNoteSearchOpen(false)}
+        onJumpToNote={handleJumpToNote}
       />
 
       {showAlertOnLaunch && <PriorityAlert />}

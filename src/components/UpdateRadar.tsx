@@ -28,6 +28,7 @@ import {
   Utensils,
   BookMarked,
   X,
+  BarChart3,
 } from 'lucide-react'
 
 type SortType = 'time' | 'words'
@@ -41,7 +42,7 @@ interface Props {
 }
 
 const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
-  const { state, selectNovel, markNovelReadTo, getUnreadForNovel } = useStore()
+  const { state, selectNovel, markNovelReadTo, getUnreadForNovel, batchMarkRead } = useStore()
   const [sortBy, setSortBy] = useState<SortType>('time')
   const [filterCat, setFilterCat] = useState<FilterCat>('all')
   const [filterSource, setFilterSource] = useState<FilterSource>('all')
@@ -49,8 +50,14 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
   const [wordFilter, setWordFilter] = useState({ min: 0, max: 99999999 })
   const [onlyUnread, setOnlyUnread] = useState(false)
   const [hideWatch, setHideWatch] = useState(false)
+  const [showRecap, setShowRecap] = useState(false)
 
   const recentChapters = useMemo(() => getRecentChapters(state.chapters, 24), [state.chapters])
+
+  const weeklyChapters = useMemo(
+    () => state.chapters.filter((c) => c.publishTime > Date.now() - 7 * 24 * 60 * 60 * 1000),
+    [state.chapters]
+  )
 
   const novelMap = useMemo(() => {
     const m: Record<string, Novel> = {}
@@ -63,6 +70,31 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     for (const n of state.novels) set.add(n.source)
     return Array.from(set).sort()
   }, [state.novels])
+
+  const recapStats = useMemo(() => {
+    const bySource: Record<string, { newCount: number; readCount: number }> = {}
+    const byCategory: Record<string, { newCount: number; readCount: number }> = {}
+    const byPriority: Record<string, { newCount: number; readCount: number }> = {}
+
+    for (const ch of weeklyChapters) {
+      const novel = novelMap[ch.novelId]
+      if (!novel) continue
+
+      if (!bySource[novel.source]) bySource[novel.source] = { newCount: 0, readCount: 0 }
+      bySource[novel.source].newCount++
+      if (ch.isRead) bySource[novel.source].readCount++
+
+      if (!byCategory[novel.category]) byCategory[novel.category] = { newCount: 0, readCount: 0 }
+      byCategory[novel.category].newCount++
+      if (ch.isRead) byCategory[novel.category].readCount++
+
+      if (!byPriority[novel.priority]) byPriority[novel.priority] = { newCount: 0, readCount: 0 }
+      byPriority[novel.priority].newCount++
+      if (ch.isRead) byPriority[novel.priority].readCount++
+    }
+
+    return { bySource, byCategory, byPriority }
+  }, [weeklyChapters, novelMap])
 
   const filteredChapters = useMemo(() => {
     let list = recentChapters.filter((c) => {
@@ -132,11 +164,7 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
   ]
 
   const handleMarkAllRead = () => {
-    for (const [novelId, { novel }] of groupedByNovel) {
-      if (novel.latestChapter) {
-        markNovelReadTo(novelId, novel.latestChapter)
-      }
-    }
+    batchMarkRead(filteredChapters.map((c) => c.id))
   }
 
   const handleMarkNovelRead = (novelId: string, latestChapter?: number) => {
@@ -160,6 +188,13 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
     setOnlyUnread(false)
     setHideWatch(false)
     setWordFilter({ min: 0, max: 99999999 })
+  }
+
+  const handleRecapClick = (type: 'source' | 'category' | 'priority', value: string) => {
+    if (type === 'source') setFilterSource(value)
+    else if (type === 'category') setFilterCat(value as CategoryType)
+    else if (type === 'priority') setFilterPriority(value as PriorityType)
+    setShowRecap(false)
   }
 
   return (
@@ -218,6 +253,19 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
           </div>
 
           <div className="h-5 w-px bg-novel-border" />
+
+          <button
+            onClick={() => setShowRecap(!showRecap)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              showRecap
+                ? 'bg-novel-accent/20 text-novel-accent'
+                : 'text-novel-muted hover:text-novel-text hover:bg-white/5'
+            }`}
+            title="本周复盘"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            复盘
+          </button>
 
           <button
             onClick={() => setOnlyUnread(!onlyUnread)}
@@ -289,39 +337,41 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
       {expanded && (
         <div className="px-5 py-3">
           <div className="flex flex-wrap items-center gap-4 mb-3">
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-xs text-novel-muted mr-1">来源:</span>
-              <button
-                onClick={() => setFilterSource('all')}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                  filterSource === 'all'
-                    ? 'text-white'
-                    : 'bg-novel-dark text-novel-muted hover:text-novel-text'
-                }`}
-                style={{
-                  backgroundColor: filterSource === 'all' ? '#8b8fa3' : undefined,
-                }}
-              >
-                全部
-              </button>
-              {sourceOptions.slice(0, 6).map((src) => (
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-novel-muted mr-1 flex-shrink-0">来源:</span>
+              <div className="flex items-center gap-1 overflow-x-auto max-w-full pb-1" style={{ scrollbarWidth: 'thin' }}>
                 <button
-                  key={src}
-                  onClick={() => setFilterSource(filterSource === src ? 'all' : src)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
-                    filterSource === src
+                  onClick={() => setFilterSource('all')}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex-shrink-0 ${
+                    filterSource === 'all'
                       ? 'text-white'
                       : 'bg-novel-dark text-novel-muted hover:text-novel-text'
                   }`}
                   style={{
-                    backgroundColor: filterSource === src ? CATEGORY_COLORS.xuanyi : undefined,
+                    backgroundColor: filterSource === 'all' ? '#8b8fa3' : undefined,
                   }}
-                  title={src}
                 >
-                  <Globe className="w-3 h-3" />
-                  {src.length > 4 ? src.slice(0, 4) + '…' : src}
+                  全部
                 </button>
-              ))}
+                {sourceOptions.map((src) => (
+                  <button
+                    key={src}
+                    onClick={() => setFilterSource(filterSource === src ? 'all' : src)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 flex-shrink-0 ${
+                      filterSource === src
+                        ? 'text-white'
+                        : 'bg-novel-dark text-novel-muted hover:text-novel-text'
+                    }`}
+                    style={{
+                      backgroundColor: filterSource === src ? CATEGORY_COLORS.xuanyi : undefined,
+                    }}
+                    title={src}
+                  >
+                    <Globe className="w-3 h-3" />
+                    {src.length > 4 ? src.slice(0, 4) + '…' : src}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="flex items-center gap-1 flex-wrap">
@@ -390,6 +440,109 @@ const UpdateRadar: React.FC<Props> = ({ expanded, onToggleExpanded }) => {
               ))}
             </div>
           </div>
+
+          {showRecap && (
+            <div className="mb-3 p-4 bg-novel-dark/60 border border-novel-accent/20 rounded-xl">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-novel-accent" />
+                  本周复盘
+                  <span className="text-xs text-novel-muted font-normal">
+                    （近7天 · {weeklyChapters.length}章更新）
+                  </span>
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-novel-card/80 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-novel-muted mb-2 flex items-center gap-1">
+                    <Globe className="w-3 h-3" />
+                    来源站点
+                  </p>
+                  <div className="space-y-1.5">
+                    {Object.entries(recapStats.bySource)
+                      .sort((a, b) => b[1].newCount - a[1].newCount)
+                      .map(([src, stats]) => (
+                        <button
+                          key={src}
+                          onClick={() => handleRecapClick('source', src)}
+                          className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-white/5 transition-colors text-left"
+                        >
+                          <span className="text-xs truncate flex-1 mr-2">{src}</span>
+                          <span className="text-xs flex items-center gap-2 flex-shrink-0">
+                            <span className="text-novel-accent">{stats.newCount}章</span>
+                            <span className="text-novel-muted">/</span>
+                            <span className="text-novel-feed">{stats.readCount}已读</span>
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="bg-novel-card/80 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-novel-muted mb-2">分类</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(recapStats.byCategory)
+                      .sort((a, b) => b[1].newCount - a[1].newCount)
+                      .map(([cat, stats]) => (
+                        <button
+                          key={cat}
+                          onClick={() => handleRecapClick('category', cat)}
+                          className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-white/5 transition-colors text-left"
+                        >
+                          <span
+                            className="text-xs font-medium flex items-center gap-1.5"
+                            style={{ color: CATEGORY_COLORS[cat as CategoryType] }}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: CATEGORY_COLORS[cat as CategoryType] }}
+                            />
+                            {CATEGORY_LABELS[cat as CategoryType]}
+                          </span>
+                          <span className="text-xs flex items-center gap-2 flex-shrink-0">
+                            <span className="text-novel-accent">{stats.newCount}章</span>
+                            <span className="text-novel-muted">/</span>
+                            <span className="text-novel-feed">{stats.readCount}已读</span>
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="bg-novel-card/80 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-novel-muted mb-2">优先级</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(recapStats.byPriority)
+                      .sort((a, b) => b[1].newCount - a[1].newCount)
+                      .map(([pri, stats]) => (
+                        <button
+                          key={pri}
+                          onClick={() => handleRecapClick('priority', pri)}
+                          className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-white/5 transition-colors text-left"
+                        >
+                          <span
+                            className="text-xs font-medium flex items-center gap-1.5"
+                            style={{ color: PRIORITY_COLORS[pri as PriorityType] }}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: PRIORITY_COLORS[pri as PriorityType] }}
+                            />
+                            {PRIORITY_LABELS[pri as PriorityType]}
+                          </span>
+                          <span className="text-xs flex items-center gap-2 flex-shrink-0">
+                            <span className="text-novel-accent">{stats.newCount}章</span>
+                            <span className="text-novel-muted">/</span>
+                            <span className="text-novel-feed">{stats.readCount}已读</span>
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {hasActiveFilters && (
             <div className="mb-3 p-2 px-3 bg-novel-accent/10 border border-novel-accent/30 rounded-lg text-xs flex items-center gap-2">
